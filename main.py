@@ -114,7 +114,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "chat"
         return
 
-    # CHAT MODE (GPT-4 Turbo)
+    # CHAT MODE
     if user_id not in user_memory:
         user_memory[user_id] = []
 
@@ -142,8 +142,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = response.json()
         answer = result["choices"][0]["message"]["content"]
 
-    except:
-        answer = "❌ GPT-4 javob bera olmadi."
+    except Exception as e:
+        answer = f"❌ GPT-4 javob bera olmadi.\n{e}"
 
     user_memory[user_id].append({"role": "assistant", "content": answer})
 
@@ -179,15 +179,15 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_photo(photo=image_url)
 
-    except:
-        await update.message.reply_text("❌ Rasm yaratishda xatolik.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Rasm yaratishda xatolik.\n{e}")
 
-# ================= IMAGE EDIT =================
+# ================= FIXED IMAGE EDIT =================
 async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = update.message.text
     image_path = context.user_data.get("last_image")
 
-    ultra_prompt = f"Ultra realistic edit, seamless blend, high detail, {prompt}"
+    ultra_prompt = f"Ultra realistic edit, seamless blend, same lighting, same perspective, high detail, {prompt}"
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API}"
@@ -198,7 +198,7 @@ async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     data = {
-        "model": "openai/dall-e-3",
+        "model": "openai/gpt-image-1",
         "prompt": ultra_prompt
     }
 
@@ -207,10 +207,16 @@ async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "https://openrouter.ai/api/v1/images/edits",
             headers=headers,
             data=data,
-            files=files
+            files=files,
+            timeout=120
         )
 
         result = response.json()
+
+        if "data" not in result:
+            await update.message.reply_text(str(result))
+            return
+
         image_url = result["data"][0]["url"]
 
         await update.message.reply_photo(photo=image_url)
@@ -218,8 +224,8 @@ async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         os.remove(image_path)
         context.user_data.pop("last_image")
 
-    except:
-        await update.message.reply_text("❌ Rasmni tahrirlashda xatolik.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Rasmni tahrirlashda xatolik.\n{e}")
 
 # ================= MAIN =================
 def main():
