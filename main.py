@@ -29,7 +29,7 @@ async def check_subscription(user_id, context):
 def main_menu():
     keyboard = [
         [
-            InlineKeyboardButton("💬 GPT-4 Turbo Chat", callback_data="chat"),
+            InlineKeyboardButton("💬 GPT-4o Chat", callback_data="chat"),
             InlineKeyboardButton("🎨 Ultra Real Rasm", callback_data="image")
         ],
         [InlineKeyboardButton("🧹 Xotirani tozalash", callback_data="clear")]
@@ -55,7 +55,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "chat"
 
     await update.message.reply_text(
-        "🔥 GPT-4 Turbo Premium AI Botga xush kelibsiz!",
+        "🔥 GPT-4o Ultra AI Botga xush kelibsiz!",
         reply_markup=main_menu()
     )
 
@@ -73,7 +73,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "chat":
         context.user_data["mode"] = "chat"
-        await query.message.reply_text("🧠 GPT-4 Turbo rejimi yoqildi.")
+        await query.message.reply_text("🧠 GPT-4o rejimi yoqildi.")
 
     elif query.data == "image":
         context.user_data["mode"] = "image"
@@ -95,7 +95,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_image"] = file_path
 
     await update.message.reply_text(
-        "📸 Rasm qabul qilindi.\nEndi nima qo‘shishni yozing.\nMasalan: yonimga model qiz qo‘y, ultra realistik"
+        "📸 Rasm qabul qilindi.\nEndi nima qo‘shishni yozing."
     )
 
 # ================= TEXT HANDLER =================
@@ -103,12 +103,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # IMAGE EDIT
+    # IMAGE EDIT MODE
     if "last_image" in context.user_data:
         await edit_image(update, context)
         return
 
-    # IMAGE GENERATION
+    # IMAGE GENERATION MODE
     if context.user_data.get("mode") == "image":
         await generate_image(update, context)
         context.user_data["mode"] = "chat"
@@ -140,20 +140,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         result = response.json()
+
+        if "choices" not in result:
+            await update.message.reply_text(str(result))
+            return
+
         answer = result["choices"][0]["message"]["content"]
 
     except Exception as e:
-        answer = f"❌ GPT-4 javob bera olmadi.\n{e}"
+        answer = f"❌ GPT javob bera olmadi:\n{e}"
 
     user_memory[user_id].append({"role": "assistant", "content": answer})
-
     await update.message.reply_text(answer)
 
-# ================= ULTRA IMAGE GENERATION =================
+# ================= IMAGE GENERATION =================
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = update.message.text
 
-    ultra_prompt = f"Ultra realistic, 8k, cinematic lighting, highly detailed, professional photography, {prompt}"
+    ultra_prompt = f"Ultra realistic, 8k, cinematic lighting, detailed, professional photography, {prompt}"
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API}",
@@ -171,43 +175,6 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "https://openrouter.ai/api/v1/images/generations",
             headers=headers,
             json=data,
-            timeout=90
-        )
-
-        result = response.json()
-        image_url = result["data"][0]["url"]
-
-        await update.message.reply_photo(photo=image_url)
-
-    except Exception as e:
-        await update.message.reply_text(f"❌ Rasm yaratishda xatolik.\n{e}")
-
-# ================= FIXED IMAGE EDIT =================
-async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = update.message.text
-    image_path = context.user_data.get("last_image")
-
-    ultra_prompt = f"Ultra realistic edit, seamless blend, same lighting, same perspective, high detail, {prompt}"
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API}"
-    }
-
-    files = {
-        "image": open(image_path, "rb")
-    }
-
-    data = {
-        "model": "openai/gpt-image-1",
-        "prompt": ultra_prompt
-    }
-
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/images/edits",
-            headers=headers,
-            data=data,
-            files=files,
             timeout=120
         )
 
@@ -218,14 +185,51 @@ async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         image_url = result["data"][0]["url"]
+        await update.message.reply_photo(photo=image_url)
 
+    except Exception as e:
+        await update.message.reply_text(f"❌ Rasm yaratishda xatolik:\n{e}")
+
+# ================= IMAGE EDIT =================
+async def edit_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompt = update.message.text
+    image_path = context.user_data.get("last_image")
+
+    ultra_prompt = f"Ultra realistic seamless edit, same lighting, same angle, same perspective, {prompt}"
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API}"
+    }
+
+    try:
+        with open(image_path, "rb") as img:
+
+            response = requests.post(
+                "https://openrouter.ai/api/v1/images/edits",
+                headers=headers,
+                files={"image": img},
+                data={
+                    "model": "openai/dall-e-3",
+                    "prompt": ultra_prompt,
+                    "size": "1024x1024"
+                },
+                timeout=120
+            )
+
+        result = response.json()
+
+        if "data" not in result:
+            await update.message.reply_text(str(result))
+            return
+
+        image_url = result["data"][0]["url"]
         await update.message.reply_photo(photo=image_url)
 
         os.remove(image_path)
         context.user_data.pop("last_image")
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Rasmni tahrirlashda xatolik.\n{e}")
+        await update.message.reply_text(f"❌ Rasmni tahrirlashda xatolik:\n{e}")
 
 # ================= MAIN =================
 def main():
@@ -242,7 +246,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("🔥 GPT-4 Ultra Bot ishga tushdi 🚀")
+    print("🔥 GPT-4o Ultra Bot ishga tushdi 🚀")
     app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
