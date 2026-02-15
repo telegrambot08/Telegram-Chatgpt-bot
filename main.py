@@ -1,7 +1,5 @@
 import os
 import requests
-from flask import Flask
-from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,25 +10,15 @@ from telegram.ext import (
     filters
 )
 
+# ====== ENV VARIABLES ======
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API = os.getenv("OPENROUTER_API")
 CHANNEL_USERNAME = "@sheraliyev_reklama"
 
+# ====== USER MEMORY ======
 user_memory = {}
 
-# ===== KEEP ALIVE =====
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot ishlayapti 🚀"
-
-def run():
-    app.run(host="0.0.0.0", port=8080)
-
-Thread(target=run).start()
-
-# ===== OBUNA TEKSHIRISH =====
+# ====== OBUNA TEKSHIRISH ======
 async def check_subscription(user_id, context):
     try:
         member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
@@ -38,8 +26,8 @@ async def check_subscription(user_id, context):
     except:
         return False
 
-# ===== MENU =====
-def menu():
+# ====== MENU ======
+def main_menu():
     keyboard = [
         [InlineKeyboardButton("💬 AI Chat", callback_data="chat")],
         [InlineKeyboardButton("🖼 Rasm yaratish", callback_data="image")],
@@ -47,13 +35,14 @@ def menu():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ===== START =====
+# ====== START ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not await check_subscription(user_id, context):
         keyboard = [
-            [InlineKeyboardButton("📢 Kanalga obuna bo‘lish", url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}")],
+            [InlineKeyboardButton("📢 Kanalga obuna bo‘lish",
+                                  url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}")],
             [InlineKeyboardButton("✅ Tekshirish", callback_data="check")]
         ]
         await update.message.reply_text(
@@ -62,34 +51,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    context.user_data["mode"] = "chat"
+
     await update.message.reply_text(
         "🔥 Professional AI Botga xush kelibsiz!",
-        reply_markup=menu()
+        reply_markup=main_menu()
     )
 
-# ===== BUTTON HANDLER =====
+# ====== BUTTONS ======
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == "check":
         if await check_subscription(query.from_user.id, context):
-            await query.message.reply_text("✅ Obuna tasdiqlandi!", reply_markup=menu())
+            context.user_data["mode"] = "chat"
+            await query.message.reply_text("✅ Obuna tasdiqlandi!", reply_markup=main_menu())
         else:
             await query.message.reply_text("❌ Hali obuna bo‘lmagansiz!")
+
+    elif query.data == "chat":
+        context.user_data["mode"] = "chat"
+        await query.message.reply_text("💬 AI Chat rejimi yoqildi.")
+
+    elif query.data == "image":
+        context.user_data["mode"] = "image"
+        await query.message.reply_text("🖼 Rasm tasvirini yozing.")
 
     elif query.data == "clear":
         user_memory.pop(query.from_user.id, None)
         await query.message.reply_text("🧹 Xotira tozalandi!")
 
-    elif query.data == "image":
-        await query.message.reply_text("Rasm tasvirini yozing...")
-
-# ===== AI CHAT + XOTIRA =====
-async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ====== TEXT HANDLER ======
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
+    # IMAGE MODE
+    if context.user_data.get("mode") == "image":
+        await generate_image(update, context)
+        context.user_data["mode"] = "chat"
+        return
+
+    # CHAT MODE
     if user_id not in user_memory:
         user_memory[user_id] = []
 
@@ -105,24 +109,25 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "messages": user_memory[user_id]
     }
 
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers=headers,
-        json=data
-    )
-
-    result = response.json()
-
     try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+
+        result = response.json()
         answer = result["choices"][0]["message"]["content"]
-    except:
-        answer = "Xatolik yuz berdi."
+
+    except Exception as e:
+        answer = "AI javob bera olmadi."
 
     user_memory[user_id].append({"role": "assistant", "content": answer})
 
     await update.message.reply_text(answer)
 
-# ===== IMAGE GENERATION =====
+# ====== IMAGE GENERATION ======
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = update.message.text
 
@@ -137,30 +142,38 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "size": "1024x1024"
     }
 
-    response = requests.post(
-        "https://openrouter.ai/api/v1/images/generations",
-        headers=headers,
-        json=data
-    )
-
-    result = response.json()
-
     try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/images/generations",
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+
+        result = response.json()
         image_url = result["data"][0]["url"]
+
         await update.message.reply_photo(photo=image_url)
+
     except:
         await update.message.reply_text("Rasm yaratishda xatolik.")
 
-# ===== MAIN =====
+# ====== MAIN ======
 def main():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    if not BOT_TOKEN:
+        raise ValueError("BOT_TOKEN qo‘yilmagan!")
 
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CallbackQueryHandler(buttons))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat))
+    if not OPENROUTER_API:
+        raise ValueError("OPENROUTER_API qo‘yilmagan!")
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("Bot ishga tushdi 🚀")
-    app_bot.run_polling()
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
